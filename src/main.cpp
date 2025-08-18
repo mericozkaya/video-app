@@ -17,29 +17,13 @@ int main(int argc, const char** argv)   {
         return 1;
     }
 
-    //CHATGPT
-    glfwMakeContextCurrent(window);
-    glfwSwapInterval(1); // vsync
-
-    // 1) VIEWPORT'U AYARLA (kritik)
-    int fbw, fbh;
-    glfwGetFramebufferSize(window, &fbw, &fbh);
-    glViewport(0, 0, fbw, fbh);
-
-    // 2) ARKA PLAN RENGİ (görsel teyit için)
-    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-
-    // 3) PIXEL STORAGE HİZALAMASI
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    //CHATGPT
 
     unsigned char* data = new unsigned char[100 * 100 * 3];
-    for (int y = 0; y<100; ++y) {
+    for (int y = 0; y < 100; ++y) {
         for (int x=0; x<100; ++x) {
-            data[y*100*3+x*3    ] = 0xff;
+            data[y * 100 * 3 + x * 3    ] = 0xff;
             data[y*100*3+x*3+1] = 0x00;
-            data[y*100*3+x*3+2] = 0x00;
-
+            data[y*100*3+x*3+2] = 0x00; 
         }
         
     }
