@@ -21,7 +21,7 @@ int main(int argc, const char** argv)   {
     unsigned char* data = new unsigned char[100 * 100 * 3];
     for (int y = 0; y < 100; ++y) {
         for (int x=0; x<100; ++x) {
-            data[y * 100 * 3 + x * 3    ] = 0xff;
+            data[y*100*3+x*3] = 0xff;
             data[y*100*3+x*3+1] = 0x00;
             data[y*100*3+x*3+2] = 0x00; 
         }
