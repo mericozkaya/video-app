@@ -35,6 +35,7 @@ int main(int argc, const char** argv)   {
         }  
     }
 
+    //Gözükmeme sorunu için aşağıdaki komutun yeri değiştirildi.
     glfwMakeContextCurrent(window);
 
     GLuint tex_handle;
