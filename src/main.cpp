@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <GLFW/glfw3.h>
+#include "video_reader.hpp"
+
 
 bool load_frame(const char* filename, int* width,int* height, unsigned char** data);
 
@@ -14,8 +16,7 @@ int main(int argc, const char** argv)   {
 
     //glf penceresi oluşturuldu 
     // Pencereyi yeniden boyutlandırılabilir ve dekorlu olarak oluştur
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+    
     window =glfwCreateWindow(640,280, "Hello World",NULL, NULL);
     if(!window) {
         printf("Couldn't open window\n");
@@ -41,12 +42,22 @@ int main(int argc, const char** argv)   {
     }
 */
 
-    int frame_width, frame_height;
-    unsigned char* frame_data;
-    if(!load_frame("/home/meric/vestel/video-app/ugwey.mp4", &frame_width, &frame_height, &frame_data)){  
+    VideoReaderState vr_state;
+    if (!video_reader_open(&vr_state, "/home/meric/vestel/video-app/ugwey.mp4")){
+        printf("Couldn't open video file\n");
+        return 1;
+    }
+
+    const int frame_width = vr_state.width;
+    const int frame_height = vr_state.height;
+    uint8_t* frame_data = new uint8_t[frame_width * frame_height * 4];
+
+    if(!video_reader_read_frame(&vr_state, frame_data)) {
         printf("Couldn't load video frame\n");
         return 1;
     }
+    video_reader_close(&vr_state);
+
     //Gözükmeme sorunu için aşağıdaki komutun yeri değiştirildi.
     glfwMakeContextCurrent(window);
 
