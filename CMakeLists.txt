@@ -16,6 +16,7 @@ elseif(WIN32)
     list(APPEND EXTRA_LIBS
         "-lglu32 -lopengl32"
     )
+    set(CMAKE_EXE_LINKER_FLAGS "-std=gnu99 -static -static-libgcc -static-libstdc++ -mwindows")
 else()
     
     list(APPEND EXTRA_LIBS 
@@ -23,5 +24,11 @@ else()
     )
 endif()
 
-add_executable(video-app src/main.cpp)
-target_link_libraries(video-app FFmpeg glfw ${EXTRA_LIBS})
+list(APPEND SOURCES
+    src/main.cpp
+    src/load_frame.cpp
+)
+
+add_executable(video-app ${SOURCES})
+target_link_libraries(video-app FFmpeg glfw avformat avcodec avutil swscale ${EXTRA_LIBS})
+
