@@ -13,6 +13,9 @@ int main(int argc, const char** argv)   {
     }
 
     //glf penceresi oluşturuldu 
+    // Pencereyi yeniden boyutlandırılabilir ve dekorlu olarak oluştur
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+    glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
     window =glfwCreateWindow(640,280, "Hello World",NULL, NULL);
     if(!window) {
         printf("Couldn't open window\n");
@@ -40,7 +43,7 @@ int main(int argc, const char** argv)   {
 
     int frame_width, frame_height;
     unsigned char* frame_data;
-    if(!load_frame("/home/meric/vestel/video-app/cem.mp4", &frame_width, &frame_height, &frame_data)){  
+    if(!load_frame("/home/meric/vestel/video-app/ugwey.mp4", &frame_width, &frame_height, &frame_data)){  
         printf("Couldn't load video frame\n");
         return 1;
     }
