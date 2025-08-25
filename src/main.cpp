@@ -47,6 +47,9 @@ int main(int argc, const char** argv) {
     const int frame_height = vr_state.height;
     uint8_t* frame_data = new uint8_t[frame_width * frame_height * 4];
 
+    bool first_frame = true;
+    double first_frame_time;
+
     // Döngü
     while (!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -61,9 +64,22 @@ int main(int argc, const char** argv) {
         glLoadIdentity();
 
         // Yeni frame oku
-        if (!video_reader_read_frame(&vr_state, frame_data)) {
+        int64_t pts;
+        if (!video_reader_read_frame(&vr_state, frame_data, &pts)) {
             printf("Couldn't load video frame\n");
-            break; // video bitti / hata
+            return 1; // video bitti / hata
+        }
+
+        static bool first_frame = true;
+        if (first_frame) {
+            glfwSetTime(0.0);
+            first_frame = false;
+        }
+
+        double pt_in_seconds = pts * (double)vr_state.time_base.num / (double)vr_state.time_base.den;
+        while (pt_in_seconds > glfwGetTime()) {
+            //no-op
+
         }
 
         // Texture'a yükle (klasik yöntem)

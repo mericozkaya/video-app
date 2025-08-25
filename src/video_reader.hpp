@@ -12,6 +12,7 @@ extern "C"{
 struct VideoReaderState {
     //Public things for other parts of the program to read from
     int width,height;
+    AVRational time_base;
     
 
     //Private ınternal state
@@ -24,7 +25,7 @@ struct VideoReaderState {
 };
 
 bool video_reader_open(VideoReaderState* state, const char* filename);
-bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer);
+bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer, int64_t*  pts);
 void video_reader_close(VideoReaderState* state);
 
 #endif
