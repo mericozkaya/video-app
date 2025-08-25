@@ -4,8 +4,8 @@
 extern "C"{
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
-#include <inttypes.h>
 #include <libswscale/swscale.h>
+#include <inttypes.h>
 }
 
 
@@ -17,6 +17,7 @@ struct VideoReaderState {
     //Private ınternal state
     AVFormatContext* av_format_ctx;
     AVCodecContext* av_codec_ctx;
+    int video_stream_index;
     AVFrame* av_frame;
     AVPacket* av_packet;
     SwsContext* sws_scaler_ctx;
