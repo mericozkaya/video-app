@@ -37,8 +37,8 @@ int main(int argc, const char** argv) {
     glGenTextures(1, &tex_handle);
     glBindTexture(GL_TEXTURE_2D, tex_handle);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE); // repeat yerine clamp
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
@@ -48,14 +48,17 @@ int main(int argc, const char** argv) {
     uint8_t* frame_data = new uint8_t[frame_width * frame_height * 4];
 
     bool first_frame = true;
-    double first_frame_time;
 
     // Döngü
     while (!glfwWindowShouldClose(window)) {
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
         int window_width, window_height;
         glfwGetFramebufferSize(window, &window_width, &window_height);
+
+        // Viewport'u pencere boyutuna eşitle (kritik)
+        glViewport(0, 0, window_width, window_height);
+
+        glClearColor(0.f, 0.f, 0.f, 1.f);
+        glClear(GL_COLOR_BUFFER_BIT);
 
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
@@ -66,11 +69,10 @@ int main(int argc, const char** argv) {
         // Yeni frame oku
         int64_t pts;
         if (!video_reader_read_frame(&vr_state, frame_data, &pts)) {
-            printf("Couldn't load video frame\n");
-            return 1; // video bitti / hata
+            printf("Couldn't load video frame (eof or error)\n");
+            break; // video bitti / hata
         }
 
-        static bool first_frame = true;
         if (first_frame) {
             glfwSetTime(0.0);
             first_frame = false;
@@ -78,8 +80,7 @@ int main(int argc, const char** argv) {
 
         double pt_in_seconds = pts * (double)vr_state.time_base.num / (double)vr_state.time_base.den;
         while (pt_in_seconds > glfwGetTime()) {
-            //no-op
-
+            // basit zamanlama
         }
 
         // Texture'a yükle (klasik yöntem)
@@ -91,15 +92,28 @@ int main(int argc, const char** argv) {
         // Renk modülasyonu yapma
         glColor4f(1.f, 1.f, 1.f, 1.f);
 
-        // PENCEREYİ TAM DOLDUR (stretch) + DİKEY FLIP (v koordinatlarını ters çevir)
+        // --- ASPECT KORUYARAK ÇİZ ---
+        // pencereye sığacak ölçeği bul (letterbox/pillarbox)
+        double sx = (double)window_width  / (double)frame_width;
+        double sy = (double)window_height / (double)frame_height;
+        double scale = (sx < sy) ? sx : sy;
+
+        int draw_w = (int)(frame_width  * scale + 0.5);
+        int draw_h = (int)(frame_height * scale + 0.5);
+        int x0 = (window_width  - draw_w) / 2;
+        int y0 = (window_height - draw_h) / 2;
+        int x1 = x0 + draw_w;
+        int y1 = y0 + draw_h;
+
+        // Dikey flip: v koordinatlarını ters çeviriyoruz
         glEnable(GL_TEXTURE_2D);
         glBindTexture(GL_TEXTURE_2D, tex_handle);
         glBegin(GL_QUADS);
-            // DİKKAT: (v) 1↔0 çevrildi -> ters görüntü düzelir
-            glTexCoord2d(0, 1); glVertex2i(0,               0);                // sol-alt
-            glTexCoord2d(1, 1); glVertex2i(window_width,    0);                // sağ-alt
-            glTexCoord2d(1, 0); glVertex2i(window_width,    window_height);    // sağ-üst
-            glTexCoord2d(0, 0); glVertex2i(0,               window_height);    // sol-üst
+            // sol-alt, sağ-alt, sağ-üst, sol-üst
+            glTexCoord2d(0, 1); glVertex2i(x0, y0);
+            glTexCoord2d(1, 1); glVertex2i(x1, y0);
+            glTexCoord2d(1, 0); glVertex2i(x1, y1);
+            glTexCoord2d(0, 0); glVertex2i(x0, y1);
         glEnd();
         glDisable(GL_TEXTURE_2D);
 
@@ -116,8 +130,3 @@ int main(int argc, const char** argv) {
     glfwTerminate();
     return 0;
 }
-
-// Kodun çalışıp hiç bir şeyin ekrana gelmemesi
-// sorunu gerekli kütüphane kurulumları ile
-// düzeldi kod aşağıdadır
-// g++ main.cpp -o video-app -lglfw -lGL -ldl -lpthread
