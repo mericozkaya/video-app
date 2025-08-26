@@ -34,3 +34,7 @@ list(APPEND SOURCES
 add_executable(video-app ${SOURCES})
 # swresample + SDL2 eklendi
 target_link_libraries(video-app FFmpeg glfw avformat avcodec avutil swscale swresample ${SDL2_LIBRARIES} ${EXTRA_LIBS})
+
+target_include_directories(video-app PRIVATE
+    ${CMAKE_SOURCE_DIR}/lib/portable-file-dialogs
+)
