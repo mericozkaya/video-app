@@ -1,0 +1,7 @@
+#ifndef VIDEO_APP_PLAYER_HPP
+#define VIDEO_APP_PLAYER_HPP
+
+// Basit API: ver yolu, oynat.
+int run_player(const char* filename);
+
+#endif

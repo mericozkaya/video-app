@@ -1,3 +1,5 @@
+//video_reader.cpp
+
 extern "C" {
 #include <libavutil/error.h>
 }
@@ -148,7 +150,7 @@ bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer, int
 
     *pts = av_frame->pts;
 
-    printf(
+    /* printf(
         "Frame %c (%d) pts %d dts %d key_frame %d [coded_picture_number %d, display_picture_number %d]\n",
         av_get_picture_type_char(av_frame->pict_type),
         av_codec_ctx->frame_number,
@@ -157,7 +159,7 @@ bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer, int
         av_frame->key_frame,
         av_frame->coded_picture_number,
         av_frame->display_picture_number
-    );
+    );*/
 
 
     if(!sws_scaler_ctx) {
