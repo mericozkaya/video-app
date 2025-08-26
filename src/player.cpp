@@ -6,7 +6,7 @@
 #include <SDL2/SDL.h>
 #include <cstdio>
 #include <cstdint>
-#include <algorithm> // std::min
+#include <algorithm>
 
 int run_player(const char* filename) {
     // --- GLFW / OpenGL ---
@@ -99,60 +99,112 @@ int run_player(const char* filename) {
     double audio_end_pts  = 0.0;
     bool   audio_started  = false;
 
-    while (SDL_GetQueuedAudioSize(dev) < (Uint32)(0.3 * BYTES_PER_SEC)) {
-        uint8_t* data = nullptr; int nbytes = 0;
-        double a_start = 0.0, a_end = 0.0;
-        if (!sound_reader_read(&sr, &data, &nbytes, &a_start, &a_end)) break;
-        if (!audio_started) { audio_pts_base = a_start; audio_started = true; }
-        audio_end_pts = a_end;
-        SDL_QueueAudio(dev, data, nbytes);
-        delete[] data;
-    }
+    auto prebuffer_audio = [&]() {
+        audio_started = false;
+        audio_end_pts = 0.0;
+        audio_pts_base = 0.0;
+
+        while (SDL_GetQueuedAudioSize(dev) < (Uint32)(0.3 * BYTES_PER_SEC)) {
+            uint8_t* data = nullptr; int nbytes = 0;
+            double a_start = 0.0, a_end = 0.0;
+            if (!sound_reader_read(&sr, &data, &nbytes, &a_start, &a_end)) break;
+            if (!audio_started) { audio_pts_base = a_start; audio_started = true; }
+            audio_end_pts = a_end;
+            SDL_QueueAudio(dev, data, nbytes);
+            delete[] data;
+        }
+    };
+    prebuffer_audio();
     SDL_PauseAudioDevice(dev, 0); // oynat
 
     // --- Senkron ---
     bool first_video = true;
     double video_pts_base = 0.0;
 
+    // --- Kontroller ---
+    bool paused = false;
+    bool prevSpace = false, prevLeft = false, prevRight = false;
+
+    auto get_audio_clock = [&]() -> double {
+        double queued = (double)SDL_GetQueuedAudioSize(dev) / (double)BYTES_PER_SEC;
+        return audio_end_pts - queued; // absolute audio clock (sec)
+    };
+
+    auto do_seek = [&](double target_sec) {
+        if (target_sec < 0.0) target_sec = 0.0;
+
+        SDL_PauseAudioDevice(dev, 1);
+        SDL_ClearQueuedAudio(dev);
+
+        if (!sound_reader_seek(&sr, target_sec)) std::printf("audio seek failed\n");
+        if (!video_reader_seek(&vr, target_sec)) std::printf("video seek failed\n");
+
+        prebuffer_audio();
+        first_video = true; // video bazını ilk frame’de yeniden al
+
+        SDL_PauseAudioDevice(dev, paused ? 1 : 0);
+    };
+
     // FPS ölçümü (opsiyonel)
     uint32_t fps_t0 = SDL_GetTicks();
     int frames_drawn = 0;
 
     while (!glfwWindowShouldClose(window)) {
-        // Ses kuyruğunu besle
-        while (SDL_GetQueuedAudioSize(dev) < (Uint32)(0.3 * BYTES_PER_SEC)) {
-            uint8_t* data = nullptr; int nbytes = 0;
-            double a_start = 0.0, a_end = 0.0;
-            if (!sound_reader_read(&sr, &data, &nbytes, &a_start, &a_end)) {
+        glfwPollEvents();
+
+        // --- Klavye kontrolleri ---
+        bool sp = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
+        if (sp && !prevSpace) {
+            paused = !paused;
+            SDL_PauseAudioDevice(dev, paused ? 1 : 0);
+        }
+        prevSpace = sp;
+
+        bool left = glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
+        if (left && !prevLeft) do_seek(get_audio_clock() - 5.0);
+        prevLeft = left;
+
+        bool right = glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS;
+        if (right && !prevRight) do_seek(get_audio_clock() + 5.0);
+        prevRight = right;
+
+        // Ses kuyruğunu besle (pause değilken)
+        if (!paused) {
+            while (SDL_GetQueuedAudioSize(dev) < (Uint32)(0.3 * BYTES_PER_SEC)) {
+                uint8_t* data = nullptr; int nbytes = 0;
+                double a_start = 0.0, a_end = 0.0;
+                if (!sound_reader_read(&sr, &data, &nbytes, &a_start, &a_end)) {
+                    break; // EOF
+                }
+                audio_end_pts = a_end;
+                SDL_QueueAudio(dev, data, nbytes);
+                delete[] data;
+            }
+        }
+
+        // Video frame oku (pause değilken)
+        int64_t vpts_i64 = 0;
+        double vpts_sec = 0.0;
+        if (!paused) {
+            if (!video_reader_read_frame(&vr, frame_data, &vpts_i64)) {
                 break; // EOF
             }
-            audio_end_pts = a_end;
-            SDL_QueueAudio(dev, data, nbytes);
-            delete[] data;
+            vpts_sec = vpts_i64 * (double)vr.time_base.num / (double)vr.time_base.den;
+            if (first_video) { video_pts_base = vpts_sec; first_video = false; }
         }
 
-        // Video frame oku
-        int64_t vpts_i64 = 0;
-        if (!video_reader_read_frame(&vr, frame_data, &vpts_i64)) {
-            // EOF
-            break;
-        }
-        double vpts_sec = vpts_i64 * (double)vr.time_base.num / (double)vr.time_base.den;
-        if (first_video) { video_pts_base = vpts_sec; first_video = false; }
+        // Senkron bekleme (audio master), sadece pause değilken
+        if (!paused) {
+            double queued_sec = (double)SDL_GetQueuedAudioSize(dev) / (double)BYTES_PER_SEC;
+            double audio_clock_rel = (audio_end_pts - audio_pts_base) - queued_sec;
+            double video_rel = vpts_sec - video_pts_base;
 
-        // Audio clock (relative)
-        double queued_sec = (double)SDL_GetQueuedAudioSize(dev) / (double)BYTES_PER_SEC;
-        double audio_clock_rel = (audio_end_pts - audio_pts_base) - queued_sec;
-
-        // Video PTS (relative)
-        double video_rel = vpts_sec - video_pts_base;
-
-        // Senkron: video ilerdeyse biraz bekle
-        while (video_rel > audio_clock_rel) {
-            glfwPollEvents();
-            SDL_Delay(1);
-            queued_sec = (double)SDL_GetQueuedAudioSize(dev) / (double)BYTES_PER_SEC;
-            audio_clock_rel = (audio_end_pts - audio_pts_base) - queued_sec;
+            while (video_rel > audio_clock_rel) {
+                glfwPollEvents();
+                SDL_Delay(1);
+                queued_sec = (double)SDL_GetQueuedAudioSize(dev) / (double)BYTES_PER_SEC;
+                audio_clock_rel = (audio_end_pts - audio_pts_base) - queued_sec;
+            }
         }
 
         // --- Render ---
@@ -194,7 +246,6 @@ int run_player(const char* filename) {
         glDisable(GL_TEXTURE_2D);
 
         glfwSwapBuffers(window);
-        glfwPollEvents();
 
         // FPS log (opsiyonel)
         frames_drawn++;
@@ -202,7 +253,7 @@ int run_player(const char* filename) {
         if (now - fps_t0 >= 1000) {
             double draw_fps = (double)frames_drawn * 1000.0 / (double)(now - fps_t0);
             char title[128];
-            std::snprintf(title, sizeof(title), "Video Player | %.1f FPS", draw_fps);
+            std::snprintf(title, sizeof(title), "Video Player | %.1f FPS  [Space:Play/Pause, ←/→:±5s]", draw_fps);
             glfwSetWindowTitle(window, title);
             frames_drawn = 0;
             fps_t0 = now;

@@ -1,5 +1,3 @@
-//sound_reader.cpp
-
 extern "C" {
 #include <libavutil/error.h>
 #include <libavutil/channel_layout.h>
@@ -91,7 +89,6 @@ bool sound_reader_read(SoundReaderState* st,
 
     int ret = 0;
 
-    // Bir frame decode edene kadar oku
     while ((ret = av_read_frame(st->fmt, st->pkt)) >= 0) {
         if (st->pkt->stream_index != st->stream_index) {
             av_packet_unref(st->pkt);
@@ -100,10 +97,7 @@ bool sound_reader_read(SoundReaderState* st,
 
         ret = avcodec_send_packet(st->dec, st->pkt);
         av_packet_unref(st->pkt);
-        if (ret < 0) {
-            std::printf("audio: send_packet: %s\n", err2str(ret));
-            return false;
-        }
+        if (ret < 0) { std::printf("audio: send_packet: %s\n", err2str(ret)); return false; }
 
         ret = avcodec_receive_frame(st->dec, st->frame);
         if (ret == AVERROR(EAGAIN)) {
@@ -115,17 +109,14 @@ bool sound_reader_read(SoundReaderState* st,
             return false;
         }
 
-        // PTS (saniye)
         int64_t ts = (st->frame->best_effort_timestamp == AV_NOPTS_VALUE)
                        ? st->frame->pts : st->frame->best_effort_timestamp;
         *pts_start_sec = ts * (double)st->time_base.num / (double)st->time_base.den;
 
-        // Gerekli çıktı örnek sayısı
         int64_t delay = swr_get_delay(st->swr, st->src_sample_rate);
         int out_count = (int)av_rescale_rnd(delay + st->frame->nb_samples,
                                             st->dst_sample_rate, st->src_sample_rate, AV_ROUND_UP);
 
-        // Çıkış buffer (interleaved)
         int out_linesize = 0;
         uint8_t* out_buf = nullptr;
         int ret_alloc = av_samples_alloc(&out_buf, &out_linesize,
@@ -135,7 +126,6 @@ bool sound_reader_read(SoundReaderState* st,
             return false;
         }
 
-        // Resample
         uint8_t** in_data = st->frame->extended_data;
         int out_samples = swr_convert(st->swr, &out_buf, out_count,
                                       (const uint8_t**)in_data, st->frame->nb_samples);
@@ -148,21 +138,57 @@ bool sound_reader_read(SoundReaderState* st,
         int bytes_per_sample = av_get_bytes_per_sample(st->dst_fmt);
         int total_bytes = out_samples * st->dst_channels * bytes_per_sample;
 
-        // Çağıran delete[] ile silebilsin diye kopyalıyoruz
         uint8_t* interleaved = new uint8_t[total_bytes];
         std::memcpy(interleaved, out_buf, total_bytes);
         av_freep(&out_buf);
 
-        *out_data  = interleaved;
+        *out_data   = interleaved;
         *out_nbytes = total_bytes;
         *pts_end_sec = *pts_start_sec + (double)out_samples / (double)st->dst_sample_rate;
 
         av_frame_unref(st->frame);
         return true;
     }
-
     return false; // EOF
 }
+
+bool sound_reader_seek(SoundReaderState* st, double seconds) {
+    if (!st || !st->fmt) return false;
+
+    // hedef zaman damgası (stream time_base)
+    int64_t ts = (int64_t)llround(seconds * st->time_base.den / (double)st->time_base.num);
+    int ret = av_seek_frame(st->fmt, st->stream_index, ts, AVSEEK_FLAG_BACKWARD);
+    if (ret < 0) {
+        std::printf("audio: seek failed: %s\n", err2str(ret));
+        return false;
+    }
+
+    // decoder ve paket/frame durumunu sıfırla
+    avcodec_flush_buffers(st->dec);
+    if (st->pkt)   av_packet_unref(st->pkt);
+    if (st->frame) av_frame_unref(st->frame);
+
+    // --- ÖNEMLİ: Resampler'ı resetle (swr_reset yoksa yeniden oluştur) ---
+    if (st->swr) swr_free(&st->swr);
+    st->swr = swr_alloc_set_opts(
+        nullptr,
+        st->dst_ch_layout, st->dst_fmt, st->dst_sample_rate,
+        st->src_ch_layout, st->dec->sample_fmt, st->src_sample_rate,
+        0, nullptr
+    );
+    if (!st->swr) {
+        std::printf("audio: swr_alloc_set_opts (recreate) failed\n");
+        return false;
+    }
+    ret = swr_init(st->swr);
+    if (ret < 0) {
+        std::printf("audio: swr_init (recreate) failed: %s\n", err2str(ret));
+        return false;
+    }
+
+    return true;
+}
+
 
 void sound_reader_close(SoundReaderState* st) {
     if (st->swr)   swr_free(&st->swr);

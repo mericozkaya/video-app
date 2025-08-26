@@ -1,5 +1,3 @@
-#CMakeLists.txt
-
 cmake_minimum_required(VERSION 3.14)
 project(video-app C CXX)
 set(CMAKE_CXX_STANDARD 14)
@@ -23,18 +21,15 @@ else()
     list(APPEND EXTRA_LIBS "-lGL -lGLU -lX11")
 endif()
 
+# portable-file-dialogs (header-only)
+include_directories(${CMAKE_SOURCE_DIR}/lib/portable-file-dialogs)
+
 list(APPEND SOURCES
     src/player.cpp
     src/main.cpp
     src/video_reader.cpp
-    src/load_frame.cpp
-    src/sound_reader.cpp    # <-- yeni
+    src/sound_reader.cpp
 )
 
 add_executable(video-app ${SOURCES})
-# swresample + SDL2 eklendi
 target_link_libraries(video-app FFmpeg glfw avformat avcodec avutil swscale swresample ${SDL2_LIBRARIES} ${EXTRA_LIBS})
-
-target_include_directories(video-app PRIVATE
-    ${CMAKE_SOURCE_DIR}/lib/portable-file-dialogs
-)
