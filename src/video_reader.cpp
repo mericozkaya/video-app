@@ -1,8 +1,7 @@
 extern "C" {
 #include <libavutil/error.h>
 }
-
-#include <cmath> // llround
+#include <cmath>
 #include <cstdio>
 #include "video_reader.hpp"
 
@@ -32,14 +31,12 @@ bool video_reader_open(VideoReaderState* state, const char* filename) {
         std::printf("Couldn't created AVFormatContext\n");
         return false;
     }
-
     int err = avformat_open_input(&av_format_ctx, filename, NULL, NULL);
     if (err < 0) {
         std::fprintf(stderr, "Couldn't open video file '%s': %s\n", filename, av_err2str(err));
         return false;
     }
 
-    // İlk geçerli video stream'i bul
     video_stream_idx = -1;
     AVCodecParameters* av_codec_params = nullptr;
     const AVCodec* av_codec = nullptr;
@@ -65,17 +62,12 @@ bool video_reader_open(VideoReaderState* state, const char* filename) {
     }
 
     av_codec_ctx = avcodec_alloc_context3(av_codec);
-    if (!av_codec_ctx) {
-        std::printf("Couldn't create AVCodecContext\n");
-        return false;
-    }
+    if (!av_codec_ctx) { std::printf("Couldn't create AVCodecContext\n"); return false; }
     if (avcodec_parameters_to_context(av_codec_ctx, av_codec_params) < 0) {
-        std::printf("Couldn't initialize AVCodecContext\n");
-        return false;
+        std::printf("Couldn't initialize AVCodecContext\n"); return false;
     }
     if (avcodec_open2(av_codec_ctx, av_codec, NULL) < 0) {
-        std::printf("Couldn't open codec\n");
-        return false;
+        std::printf("Couldn't open codec\n"); return false;
     }
 
     av_frame  = av_frame_alloc();
@@ -104,14 +96,12 @@ bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer, int
             av_packet_unref(av_packet);
             continue;
         }
-
         response = avcodec_send_packet(av_codec_ctx, av_packet);
         av_packet_unref(av_packet);
         if (response < 0) {
             std::printf("Failed to decode packet: %s\n", av_err2str(response));
             return false;
         }
-
         response = avcodec_receive_frame(av_codec_ctx, av_frame);
         if (response == AVERROR(EAGAIN) || response == AVERROR_EOF) {
             continue;
@@ -137,9 +127,8 @@ bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer, int
         std::printf("Couldn't initialize sw scaler\n");
         return false;
     }
-
-    uint8_t* dest[4]       = { frame_buffer, NULL, NULL, NULL };
-    int      dest_linesize[4] = { width * 4, 0, 0, 0 };
+    uint8_t* dest[4] = { frame_buffer, NULL, NULL, NULL };
+    int dest_linesize[4] = { width * 4, 0, 0, 0 };
     sws_scale(sws_scaler_ctx, av_frame->data, av_frame->linesize, 0, av_frame->height,
               dest, dest_linesize);
     return true;
@@ -150,11 +139,22 @@ bool video_reader_seek(VideoReaderState* s, double seconds) {
     int64_t ts = (int64_t)llround(seconds * s->time_base.den / (double)s->time_base.num);
     if (av_seek_frame(s->av_format_ctx, s->video_stream_index, ts, AVSEEK_FLAG_BACKWARD) < 0)
         return false;
-
     avcodec_flush_buffers(s->av_codec_ctx);
     if (s->av_packet) av_packet_unref(s->av_packet);
     if (s->av_frame)  av_frame_unref(s->av_frame);
     return true;
+}
+
+double video_reader_get_duration_sec(const VideoReaderState* s) {
+    if (!s || !s->av_format_ctx) return 0.0;
+    AVStream* st = s->av_format_ctx->streams[s->video_stream_index];
+    if (st && st->duration > 0 && st->time_base.den != 0) {
+        return st->duration * (double)st->time_base.num / (double)st->time_base.den;
+    }
+    if (s->av_format_ctx->duration > 0) {
+        return (double)s->av_format_ctx->duration / (double)AV_TIME_BASE;
+    }
+    return 0.0; // bilinmiyor (ör. canlı yayın)
 }
 
 void video_reader_close(VideoReaderState* state) {

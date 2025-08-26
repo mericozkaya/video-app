@@ -26,8 +26,10 @@ bool video_reader_open(VideoReaderState* state, const char* filename);
 bool video_reader_read_frame(VideoReaderState* state, uint8_t* frame_buffer, int64_t* pts);
 void video_reader_close(VideoReaderState* state);
 
-
-// NEW: seek (seconds, stream time_base ile hesaplanır)
+// seek (seconds)
 bool video_reader_seek(VideoReaderState* state, double seconds);
+
+// NEW: süre (saniye). Bilinmiyorsa <=0 dönebilir.
+double video_reader_get_duration_sec(const VideoReaderState* state);
 
 #endif
