@@ -14,7 +14,7 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl2.h"
 
-// küçük yardımcılar
+// helpers
 static inline std::string fmt_time(double sec) {
     if (sec < 0) sec = 0;
     int s = (int)(sec + 0.5);
@@ -109,12 +109,18 @@ int run_player(const char* filename) {
 
     // --- Prebuffer ~300ms ---
     double audio_pts_base = 0.0, audio_end_pts = 0.0; bool audio_started = false;
-    double file_start_sec = 0.0; bool have_file_start = false; // dosya başlangıcı (sabit)
+    double file_start_sec = 0.0; bool have_file_start = false; // fixed file start
 
     // UI state
     bool paused = false, prevSpace=false, prevLeft=false, prevRight=false;
     bool seeking_slider = false;
-    float volume01 = 1.0f; // <-- HEP buradan uygulanacak (prebuffer + feed)
+    float volume01 = 1.0f;
+
+    // Auto-hide control bar (overlay)
+    const float bar_h = 96.0f;              // bar yüksekliği
+    Uint32 last_interact = SDL_GetTicks();  // son etkileşim zamanı (ms)
+    double prev_mx = -1.0, prev_my = -1.0;  // mouse hareketi için
+    auto mark_interaction = [&](){ last_interact = SDL_GetTicks(); };
 
     auto prebuffer_audio = [&]() {
         audio_started = false; audio_end_pts = 0.0; audio_pts_base = 0.0;
@@ -126,7 +132,7 @@ int run_player(const char* filename) {
                 if (!have_file_start) { file_start_sec = a_start; have_file_start = true; }
             }
             audio_end_pts = a_end;
-            apply_volume_s16(data, nbytes, volume01); // <-- VOLUME UYGULA (prebuffer)
+            apply_volume_s16(data, nbytes, volume01);
             SDL_QueueAudio(dev, data, nbytes);
             delete[] data;
         }
@@ -141,22 +147,21 @@ int run_player(const char* filename) {
         double queued = (double)SDL_GetQueuedAudioSize(dev) / (double)BYTES_PER_SEC;
         return audio_end_pts - queued; // absolute sec
     };
-    auto get_pos_rel = [&]() -> double { // UI için 0 = dosya başlangıcı
-        return get_audio_clock_abs() - file_start_sec;
-    };
-    auto do_seek_rel = [&](double rel_sec) { // UI’den gelen göreli saniye
+    auto get_pos_rel = [&]() -> double { return get_audio_clock_abs() - file_start_sec; };
+    auto do_seek_rel = [&](double rel_sec) {
         if (rel_sec < 0.0) rel_sec = 0.0;
         double duration_sec = video_reader_get_duration_sec(&vr);
         if (duration_sec > 0.0 && rel_sec > duration_sec) rel_sec = duration_sec;
 
-        double target_abs_sec = file_start_sec + rel_sec; // mutlak saniye
+        double target_abs_sec = file_start_sec + rel_sec; // absolute
         SDL_PauseAudioDevice(dev, 1);
         SDL_ClearQueuedAudio(dev);
         if (!sound_reader_seek(&sr, target_abs_sec)) std::printf("audio seek failed\n");
         if (!video_reader_seek(&vr,  target_abs_sec)) std::printf("video seek failed\n");
-        prebuffer_audio();            // volume burada da uygulanır
-        first_video = true;           // video bazını ilk frame’de yeniden al
+        prebuffer_audio();
+        first_video = true;
         SDL_PauseAudioDevice(dev, paused ? 1 : 0);
+        mark_interaction();
     };
 
     double duration_sec = video_reader_get_duration_sec(&vr);
@@ -167,30 +172,35 @@ int run_player(const char* filename) {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        // --- Input ---
+        // mouse hareketi -> UI görünür tut
+        double mx, my; glfwGetCursorPos(window, &mx, &my);
+        if (prev_mx < 0) { prev_mx = mx; prev_my = my; }
+        if (mx != prev_mx || my != prev_my) { mark_interaction(); prev_mx = mx; prev_my = my; }
+
+        // klavye
         bool sp = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
-        if (sp && !prevSpace) { paused = !paused; SDL_PauseAudioDevice(dev, paused ? 1 : 0); }
+        if (sp && !prevSpace) { paused = !paused; SDL_PauseAudioDevice(dev, paused ? 1 : 0); mark_interaction(); }
         prevSpace = sp;
         bool left = glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS;
-        if (left && !prevLeft) do_seek_rel(get_pos_rel() - 5.0);
+        if (left && !prevLeft) { do_seek_rel(get_pos_rel() - 5.0); }
         prevLeft = left;
         bool right = glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS;
-        if (right && !prevRight) do_seek_rel(get_pos_rel() + 5.0);
+        if (right && !prevRight) { do_seek_rel(get_pos_rel() + 5.0); }
         prevRight = right;
 
-        // --- Ses kuyruğu ---
+        // Ses kuyruğu
         if (!paused && !seeking_slider) {
             while (SDL_GetQueuedAudioSize(dev) < (Uint32)(0.3 * BYTES_PER_SEC)) {
                 uint8_t* data = nullptr; int nbytes = 0; double a_start = 0.0, a_end = 0.0;
                 if (!sound_reader_read(&sr, &data, &nbytes, &a_start, &a_end)) break;
                 audio_end_pts = a_end;
-                apply_volume_s16(data, nbytes, volume01);  // <-- VOLUME UYGULA (normal besleme)
+                apply_volume_s16(data, nbytes, volume01);
                 SDL_QueueAudio(dev, data, nbytes);
                 delete[] data;
             }
         }
 
-        // --- Video frame ---
+        // Video frame
         int64_t vpts_i64 = 0; double vpts_sec = 0.0;
         if (!paused && !seeking_slider) {
             if (!video_reader_read_frame(&vr, frame_data, &vpts_i64)) break; // EOF
@@ -198,10 +208,10 @@ int run_player(const char* filename) {
             if (first_video) { video_pts_base = vpts_sec; first_video = false; }
         }
 
-        // --- Senkron (audio master) ---
+        // Senkron (audio master)
         if (!paused && !seeking_slider) {
             double queued_sec = (double)SDL_GetQueuedAudioSize(dev) / (double)BYTES_PER_SEC;
-            double audio_clock_rel = (audio_end_pts - audio_pts_base) - queued_sec; // prebuffer bazına göre
+            double audio_clock_rel = (audio_end_pts - audio_pts_base) - queued_sec;
             double video_rel = vpts_sec - video_pts_base;
             while (video_rel > audio_clock_rel) {
                 glfwPollEvents();
@@ -211,7 +221,7 @@ int run_player(const char* filename) {
             }
         }
 
-        // --- Render video ---
+        // Render video (tüm pencere; overlay bar video'nun üstüne biner ve idle'da kaybolur)
         int ww, wh; glfwGetFramebufferSize(window, &ww, &wh);
         glViewport(0, 0, ww, wh);
         glClearColor(0.f, 0.f, 0.f, 1.f);
@@ -247,59 +257,71 @@ int run_player(const char* filename) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        const float bar_h = 96.0f;
-        ImGui::SetNextWindowPos(ImVec2(0, wh - bar_h), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2((float)ww, bar_h), ImGuiCond_Always);
-        ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-                                 ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoSavedSettings;
-        if (ImGui::Begin("ControlBar", nullptr, flags)) {
-            ImGui::PushItemWidth(-1);
+        // Auto-hide görünürlük mantığı
+        Uint32 now_ms = SDL_GetTicks();
+        bool hover_bottom = (my >= (double)(wh - 80)); // pencerenin altına yakın
+        bool show_ui = paused || hover_bottom || seeking_slider || (now_ms - last_interact < 1800);
 
-            ImGui::Columns(3, nullptr, false);
-            if (ImGui::Button(paused ? "Play (Space)" : "Pause (Space)", ImVec2(150, 32))) {
-                paused = !paused;
-                SDL_PauseAudioDevice(dev, paused ? 1 : 0);
-            }
-            ImGui::NextColumn();
+        if (show_ui) {
+            ImGui::SetNextWindowBgAlpha(paused ? 1.0f : 0.92f);
+            ImGui::SetNextWindowPos(ImVec2(0, (float)(wh - bar_h)), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2((float)ww, bar_h), ImGuiCond_Always);
 
-            double cur_rel = get_pos_rel();
-            std::string time_left = fmt_time(cur_rel);
-            std::string time_total = (duration_sec > 0) ? fmt_time(duration_sec) : "--:--";
-            ImGui::Text("  %s / %s", time_left.c_str(), time_total.c_str());
-            ImGui::NextColumn();
+            ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
+            if (ImGui::Begin("ControlBar", nullptr, flags)) {
+                ImGui::PushItemWidth(-1);
 
-            ImGui::Text("Volume");
-            ImGui::SameLine();
-            ImGui::SliderFloat("##vol", &volume01, 0.0f, 1.0f, "%.2f");
-            ImGui::Columns(1);
-
-            // Timeline slider — SADECE etkileşim yokken playhead'den güncelle
-            float slider_w = ImGui::GetContentRegionAvail().x;
-            if (duration_sec > 0.0) {
-                static float slider_val = 0.0f;
-                if (!seeking_slider) slider_val = (float)cur_rel;  // <-- FIX: override etme
-                ImGui::PushItemWidth(slider_w);
-                ImGui::SliderFloat("##timeline", &slider_val, 0.0f, (float)duration_sec, "");
-                if (ImGui::IsItemActive()) seeking_slider = true;
-                if (ImGui::IsItemDeactivatedAfterEdit()) {
-                    seeking_slider = false;
-                    do_seek_rel((double)slider_val); // göreli -> mutlak
+                // Üst satır
+                ImGui::Columns(3, nullptr, false);
+                if (ImGui::Button(paused ? "Play (Space)" : "Pause (Space)", ImVec2(150, 32))) {
+                    paused = !paused; SDL_PauseAudioDevice(dev, paused ? 1 : 0); mark_interaction();
                 }
-                ImGui::PopItemWidth();
-            } else {
-                ImGui::ProgressBar(0.f, ImVec2(slider_w, 12.0f));
-            }
+                ImGui::NextColumn();
 
-            ImGui::PopItemWidth();
+                double cur_rel = get_pos_rel();
+                std::string time_left = fmt_time(cur_rel);
+                std::string time_total = (duration_sec > 0) ? fmt_time(duration_sec) : "--:--";
+                ImGui::Text("  %s / %s", time_left.c_str(), time_total.c_str());
+                ImGui::NextColumn();
+
+                ImGui::Text("Volume");
+                ImGui::SameLine();
+                if (ImGui::SliderFloat("##vol", &volume01, 0.0f, 1.0f, "%.2f")) {
+                    mark_interaction();
+                    // Anında etki istiyorsan aşağıyı aç:
+                    // SDL_PauseAudioDevice(dev, 1); SDL_ClearQueuedAudio(dev); prebuffer_audio(); SDL_PauseAudioDevice(dev, paused?1:0);
+                }
+                ImGui::Columns(1);
+
+                // Timeline
+                float slider_w = ImGui::GetContentRegionAvail().x;
+                if (duration_sec > 0.0) {
+                    static float slider_val = 0.0f;
+                    if (!seeking_slider) slider_val = (float)cur_rel; // sadece etkileşim yokken güncelle
+                    ImGui::PushItemWidth(slider_w);
+                    ImGui::SliderFloat("##timeline", &slider_val, 0.0f, (float)duration_sec, "");
+                    if (ImGui::IsItemActive()) { seeking_slider = true; mark_interaction(); }
+                    if (ImGui::IsItemDeactivatedAfterEdit()) {
+                        seeking_slider = false;
+                        do_seek_rel((double)slider_val);
+                    }
+                    ImGui::PopItemWidth();
+                } else {
+                    ImGui::ProgressBar(0.f, ImVec2(slider_w, 12.0f));
+                }
+
+                ImGui::PopItemWidth();
+            }
+            ImGui::End();
         }
-        ImGui::End();
 
         ImGui::Render();
         ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
 
-        // FPS başlık (ASCII oklar, UTF-8 uyarısı yok)
+        // FPS title
         frames_drawn++;
         uint32_t now = SDL_GetTicks();
         if (now - fps_t0 >= 1000) {
@@ -313,7 +335,7 @@ int run_player(const char* filename) {
         }
     }
 
-    // --- Temizlik ---
+    // --- cleanup ---
     delete[] frame_data;
     glDeleteTextures(1, &tex_handle);
     video_reader_close(&vr);
